@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <assembly fullname="TileClick">
+    <resource name="FSharpSignatureData.TileClick" action="remove"></resource>
+    <resource name="FSharpSignatureCompressedData.TileClick" action="remove"></resource>
+    <resource name="FSharpSignatureDataB.TileClick" action="remove"></resource>
+    <resource name="FSharpSignatureCompressedDataB.TileClick" action="remove"></resource>
+    <resource name="FSharpOptimizationData.TileClick" action="remove"></resource>
+    <resource name="FSharpOptimizationCompressedData.TileClick" action="remove"></resource>
+    <resource name="FSharpOptimizationDataB.TileClick" action="remove"></resource>
+    <resource name="FSharpOptimizationCompressedDataB.TileClick" action="remove"></resource>
+    <resource name="FSharpOptimizationInfo.TileClick" action="remove"></resource>
+    <resource name="FSharpSignatureInfo.TileClick" action="remove"></resource>
+  </assembly>
+</linker>
