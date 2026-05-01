@@ -526,23 +526,8 @@ let main _ =
     let encounterChance = 0.12
 
     // --------- Load saved game if exists ----------
-    match tryLoadGame() with
-    | Some data ->
-        let (m, pos, h) = applySave data
-        // Load map
-        if File.Exists(m) then
-            currentMap <- m
-            mapCodes <- loadMap currentMap
-            recomputeSizes()
-        // apply hero + position (clamp to bounds)
-        hero <- h
-        let pos =
-            { x = max 0 (min (mapW-1) pos.x)
-              y = max 0 (min (mapH-1) pos.y) }
-        playerTile <- pos
-        playerPos <- tileToWorld playerTile
-        toast "Loaded save.json"
-    | None -> ()
+    // Start a new game by default.
+    // Saved progress is loaded only when the user presses F9.
 
     // helper: autosave
     let autosave () =
