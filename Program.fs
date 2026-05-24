@@ -139,7 +139,7 @@ let tryLevelUp (c:Character) =
 
 // ------------------ Monsters / Battle ------------------
 
-type MonsterKind = Weak | Medium
+type MonsterKind = Weak | Medium | Boss
 
 type MonsterTemplate =
     { Name : string
@@ -169,6 +169,7 @@ type BattleState =
 type GameMode =
     | Explore
     | Battle of BattleState
+    | Victory
 
 let addLog (s:string) (b:BattleState) =
     // append to end, keep last 50
@@ -201,7 +202,7 @@ let TILE_CAVE     = 7
 
 // Map codes:
 // 0 grass, 1 sand, 2 water(block), 3 wall(block), 4 tree(block), 5 mountain(block),
-// 6 entrance, 7 exit, 8 bed
+// 6 entrance/portal, 7 exit/portal, 8 bed, 9 boss tile
 let mapCodeToTilesetIndex (code:int) =
     match code with
     | 0 -> TILE_GRASS
@@ -213,10 +214,11 @@ let mapCodeToTilesetIndex (code:int) =
     | 6 -> TILE_CAVE
     | 7 -> TILE_CAVE
     | 8 -> TILE_GRASS
+    | 9 -> TILE_SAND
     | _ -> TILE_GRASS
 
 let isWalkableCode (code:int) =
-    code = 0 || code = 1 || code = 6 || code = 7 || code = 8
+    code = 0 || code = 1 || code = 6 || code = 7 || code = 8 || code = 9
 
 let loadMap (path:string) : int[,] =
     if not (File.Exists path) then
@@ -321,11 +323,12 @@ type SaveData =
       BaseDEF    : int
       EquippedWeapon : string option
       EquippedArmor  : string option
-      Bag        : string list }
+      Bag        : string list
+      BossDefeated : bool option }
 
 let savePath = "save.json"
 
-let saveGame (currentMap:string) (playerTile:Pos) (hero:Character) =
+let saveGame (currentMap:string) (playerTile:Pos) (hero:Character) (bossDefeated:bool) =
     let data : SaveData =
         { CurrentMap = currentMap
           PlayerX = playerTile.x
@@ -339,7 +342,8 @@ let saveGame (currentMap:string) (playerTile:Pos) (hero:Character) =
           BaseDEF = hero.BaseDEF
           EquippedWeapon = hero.Equip.Weapon |> Option.map itemName
           EquippedArmor  = hero.Equip.Armor  |> Option.map itemName
-          Bag = hero.Bag |> List.map itemName }
+          Bag = hero.Bag |> List.map itemName
+          BossDefeated = Some bossDefeated }
 
     let opts = JsonSerializerOptions(WriteIndented = true)
     let json = JsonSerializer.Serialize(data, opts)
@@ -379,7 +383,7 @@ let applySave (data:SaveData) =
           Bag = bag }
 
     let pos = { x = data.PlayerX; y = data.PlayerY }
-    data.CurrentMap, pos, hero
+    data.CurrentMap, pos, hero, (data.BossDefeated |> Option.defaultValue false)
 
 // ------------------ Main ------------------
 
@@ -409,6 +413,9 @@ let main _ =
         [| { Name="Thief"; MaxHP=18; ATK=6; DEF=2; XP=10; Kind=Medium }
            { Name="Ox";    MaxHP=22; ATK=7; DEF=2; XP=12; Kind=Medium }
            { Name="Witch"; MaxHP=16; ATK=8; DEF=1; XP=12; Kind=Medium } |]
+
+    let bossMonster =
+        { Name="Dragon King"; MaxHP=50; ATK=9; DEF=5; XP=30; Kind=Boss }
 
     let chooseMonster () =
         if rng.NextDouble() < 0.70 then makeMonster weakMonsters[rng.Next weakMonsters.Length]
@@ -468,6 +475,7 @@ let main _ =
 
     // Game mode
     let mutable mode : GameMode = Explore
+    let mutable bossDefeated = false
 
     // Camera
     let mutable cam : Camera2D = Camera2D()
@@ -489,27 +497,18 @@ let main _ =
         portalCooldown <- 0.25f
 
     let respawnAtBed () =
-        let setPos (p:Pos) =
-            playerTile <- p
-            playerPos <- tileToWorld p
-            path <- []
+        currentMap <- "map.txt"
+        mapCodes <- loadMap currentMap
+        recomputeSizes()
 
-        match findFirstCode mapCodes 8 with
-        | Some bed ->
-            setPos bed
-        | None ->
-            if File.Exists("map2.txt") then
-                let map2 = loadMap "map2.txt"
-                match findFirstCode map2 8 with
-                | Some bed ->
-                    currentMap <- "map2.txt"
-                    mapCodes <- map2
-                    recomputeSizes()
-                    setPos bed
-                | None ->
-                    setPos { x = 1; y = 1 }
-            else
-                setPos { x = 1; y = 1 }
+        playerTile <-
+            match findFirstCode mapCodes 8 with
+            | Some bed -> bed
+            | None -> { x = 1; y = 1 }
+
+        playerPos <- tileToWorld playerTile
+        path <- []
+        portalCooldown <- 0.25f
 
         hero <- { hero with HP = hero.MaxHP }
 
@@ -525,14 +524,14 @@ let main _ =
     // Encounters in map2
     let encounterChance = 0.12
 
-    // --------- Load saved game if exists ----------
+    // --------- Save/load system ----------
     // Start a new game by default.
     // Saved progress is loaded only when the user presses F9.
 
     // helper: autosave
     let autosave () =
         try
-            saveGame currentMap playerTile hero
+            saveGame currentMap playerTile hero bossDefeated
         with _ -> ()
 
     while not (Raylib.WindowShouldClose() |> toBool) do
@@ -541,17 +540,18 @@ let main _ =
 
         // Manual save/load
         if Raylib.IsKeyPressed(KeyboardKey.F5) |> toBool then
-            saveGame currentMap playerTile hero
+            saveGame currentMap playerTile hero bossDefeated
             toast "Saved!"
         if Raylib.IsKeyPressed(KeyboardKey.F9) |> toBool then
             match tryLoadGame() with
             | Some data ->
-                let (m, pos, h) = applySave data
+                let (m, pos, h, savedBossDefeated) = applySave data
                 if File.Exists(m) then
                     currentMap <- m
                     mapCodes <- loadMap currentMap
                     recomputeSizes()
                 hero <- h
+                bossDefeated <- savedBossDefeated
                 let pos =
                     { x = max 0 (min (mapW-1) pos.x)
                       y = max 0 (min (mapH-1) pos.y) }
@@ -666,7 +666,17 @@ let main _ =
                     | "map2.txt", 7 ->
                         switchMap "map.txt" 6
                         autosave()
+                    | "map2.txt", 6 ->
+                        switchMap "map3.txt" 7
+                        autosave()
+                    | "map3.txt", 7 ->
+                        switchMap "map2.txt" 6
+                        autosave()
                     | _ -> ()
+
+                // Boss encounter in map3
+                if currentMap = "map3.txt" && code = 9 && not bossDefeated then
+                    startBattle (makeMonster bossMonster)
 
                 // Random encounters
                 let canEncounter =
@@ -715,8 +725,17 @@ let main _ =
                         battle <- battle |> addLog ($"{battle.Monster.Name} is defeated! You gain {gained} XP.")
                         if leveled then battle <- battle |> addLog ($"Level up! You are now Lv {hero.Level}.")
 
-                        mode <- Explore
-                        autosave()
+                        match battle.Monster.Kind with
+                        | Boss ->
+                            bossDefeated <- true
+                            path <- []
+                            inventoryOpen <- false
+                            mode <- Victory
+                            toast "Final boss defeated! You win!"
+                            autosave()
+                        | _ ->
+                            mode <- Explore
+                            autosave()
 
                     let doPlayerAttack () =
                         let dmg = rollDamage rng (effectiveATK hero) battle.Monster.DEF
@@ -729,18 +748,23 @@ let main _ =
                             doMonsterAttack()
 
                     let tryRun () =
-                        let baseChance =
-                            match battle.Monster.Kind with
-                            | Weak -> 0.75
-                            | Medium -> 0.55
-                        if rng.NextDouble() < baseChance then
-                            battle <- battle |> addLog "You ran away safely!"
-                            mode <- Explore
-                            toast "Escaped!"
-                            autosave()
-                        else
-                            battle <- battle |> addLog "You failed to run!"
-                            doMonsterAttack()
+                        match battle.Monster.Kind with
+                        | Boss ->
+                            battle <- battle |> addLog "You cannot run from the final boss!"
+                        | _ ->
+                            let baseChance =
+                                match battle.Monster.Kind with
+                                | Weak -> 0.75
+                                | Medium -> 0.55
+                                | Boss -> 0.0
+                            if rng.NextDouble() < baseChance then
+                                battle <- battle |> addLog "You ran away safely!"
+                                mode <- Explore
+                                toast "Escaped!"
+                                autosave()
+                            else
+                                battle <- battle |> addLog "You failed to run!"
+                                doMonsterAttack()
 
                     // Keyboard shortcuts
                     if not battle.Ended then
@@ -773,6 +797,10 @@ let main _ =
             match mode with
             | Battle _ -> mode <- Battle battle
             | Explore -> ()
+            | Victory -> ()
+
+        | Victory ->
+            ()
 
         // Camera follow + clamp
         let playerCenter = playerPos + Vector2(drawTileSizeF/2.0f, drawTileSizeF/2.0f)
@@ -816,6 +844,15 @@ let main _ =
                     Raylib.DrawRectangle(bx+18, by+18, drawTileSize-36, drawTileSize-24, Color(180uy, 120uy, 80uy, 255uy))
                     Raylib.DrawRectangle(bx+22, by+22, drawTileSize-44, 22, Color(235uy, 235uy, 235uy, 255uy))
                     Raylib.DrawRectangle(bx+22, by+46, drawTileSize-44, drawTileSize-58, Color(90uy, 150uy, 240uy, 255uy))
+
+                if code = 9 then
+                    let bx = x * drawTileSize
+                    let by = y * drawTileSize
+                    let markerColor =
+                        if bossDefeated then Color(80uy, 80uy, 80uy, 150uy)
+                        else Color(190uy, 40uy, 40uy, 190uy)
+                    Raylib.DrawCircle(bx + drawTileSize/2, by + drawTileSize/2, float32 (drawTileSize/4), markerColor)
+                    Raylib.DrawText("B", bx + drawTileSize/2 - 8, by + drawTileSize/2 - 12, 28, Color.RayWhite)
 
         let pSrc = Rectangle(float32 TILE_PLAYER * tileSizeF, 0.0f, tileSizeF, tileSizeF)
         let pDst = Rectangle(playerPos.X, playerPos.Y, drawTileSizeF, drawTileSizeF)
@@ -897,7 +934,7 @@ let main _ =
             Raylib.DrawRectangle(panelX, panelY, panelW, panelH, Color(22uy,22uy,26uy,240uy))
             Raylib.DrawRectangleLines(panelX, panelY, panelW, panelH, Color(230uy,230uy,230uy,200uy))
 
-            Raylib.DrawText("Encounter!", panelX+20, panelY+16, 26, Color.RayWhite)
+            Raylib.DrawText((if b.Monster.Kind = Boss then "Boss Battle!" else "Encounter!"), panelX+20, panelY+16, 26, Color.RayWhite)
 
             let fieldX, fieldY = panelX + 20, panelY + 54
             let fieldW, fieldH = panelW - 40, 170
@@ -912,6 +949,7 @@ let main _ =
                 match b.Monster.Kind with
                 | Weak -> Color(90uy, 220uy, 120uy, 255uy)
                 | Medium -> Color(220uy, 140uy, 90uy, 255uy)
+                | Boss -> Color(180uy, 70uy, 220uy, 255uy)
 
             Raylib.DrawCircle(cx, cy, r, mcol)
             Raylib.DrawCircleLines(cx, cy, r, Color(0uy,0uy,0uy,200uy))
@@ -964,10 +1002,21 @@ let main _ =
 
             Raylib.DrawRectangle(runX, runY, btnW, btnH, runColor)
             Raylib.DrawRectangleLines(runX, runY, btnW, btnH, Color(0uy,0uy,0uy,200uy))
-            Raylib.DrawText("Run (R)", runX+24, runY+12, 18, Color.RayWhite)
+            Raylib.DrawText((if b.Monster.Kind = Boss then "No Run" else "Run (R)"), runX+24, runY+12, 18, Color.RayWhite)
 
             if b.Ended then
                 Raylib.DrawText("Press SPACE to respawn at bed", panelX+320, btnBarTop+34, 16, Color.RayWhite)
+
+        | Victory ->
+            Raylib.DrawRectangle(0, 0, winW, winH, Color(0uy,0uy,0uy,180uy))
+            let panelW, panelH = 560, 260
+            let panelX, panelY = (winW - panelW)/2, (winH - panelH)/2
+            Raylib.DrawRectangle(panelX, panelY, panelW, panelH, Color(22uy,22uy,26uy,245uy))
+            Raylib.DrawRectangleLines(panelX, panelY, panelW, panelH, Color(230uy,230uy,230uy,220uy))
+            Raylib.DrawText("YOU WIN!", panelX+190, panelY+35, 36, Color.RayWhite)
+            Raylib.DrawText("You defeated the Dragon King.", panelX+120, panelY+95, 22, Color.RayWhite)
+            Raylib.DrawText("Final progress was saved automatically.", panelX+95, panelY+135, 20, Color.RayWhite)
+            Raylib.DrawText("Press ESC to close the game.", panelX+130, panelY+180, 20, Color.RayWhite)
 
         | Explore -> ()
 
