@@ -17,6 +17,7 @@
     <None Include="tileset32.png" CopyToOutputDirectory="PreserveNewest" />
     <None Include="map.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="map2.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="map3.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

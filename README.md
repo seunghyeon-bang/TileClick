@@ -9,7 +9,10 @@ TileClick is a small 2D tile-click RPG written in F# with Raylib-cs. The player 
 
 ## How to run
 
+inside your folder for the game,
 ```bash
+git clone https://github.com/seunghyeon-bang/TileClick.git
+cd TileClick
 dotnet restore
 dotnet run
 ```
